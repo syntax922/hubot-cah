@@ -60,15 +60,49 @@ random_black_card = () ->
 random_white_card = () ->
   cardIndex = Math.floor(Math.random()*whiteCards.length)
   return whiteCards[cardIndex]
-
+  
+# Shuffle deck
+# @param Array to shuffle
+# @returns shuffled array
+shuffle = (cards) ->
+  for temp, i in cards
+    j = Math.floor(Math.random() * (i + 1))
+    cards[i] = cards[j]
+    cards[j] = temp
+  cards
+  
 db = {
   scores:         {},                   # {<name>: <score>, ...}
   activePlayers:  [],                   # [<player name>, ...]
-  blackCard:      random_black_card(),  # <card text>
+  blackCardDeck:  shuffle(blackCards),   # Shuffled Deck of black cards
+  whiteCardDeck:  shuffle(whiteCards),   # Shuffled Deck of white cards
+  whiteDeckLoc:    0,                   # Current location in white deck
+  blackDeckLoc:    0,                   # Current location in black deck
+  blackCard:      random_black_card,                 # <card text>
   czar:           null,                 # <player name>
   hands:          {},                   # {<name>: [<card text>, <card text>, ...], ...}
   answers:        [],                   # [ [<player name>, [<card text>, ...]], ... ]
 }
+
+nextCard = (deck) ->
+  switch deck
+    when "white"
+      card = db.whiteCardDeck[db.whiteDeckLoc]
+      ++db.whiteDeckLoc
+      if db.whiteDeckLoc > db.whiteCardDeck.length
+        db.whiteDeckLoc = 0
+        shuffle (db.whiteCardDeck)
+      card
+    when "black" 
+      card = db.blackCardDeck[db.blackDeckLoc]
+      ++db.blackDeckLoc
+      if db.whiteDeckLoc > db.whiteCardDeck.length
+        db.blackDeckLoc = 0
+        shuffle (db.blackCardDeck)
+      card
+
+
+
 
 # prune inactive player hands, ensure everyone has five cards
 fix_hands = () ->
@@ -76,7 +110,7 @@ fix_hands = () ->
   for own name, cardArray of db.hands
     if name in db.activePlayers
       while cardArray.length < 5
-        cardArray.push random_white_card()
+        cardArray.push nextCard("white")
       newHands[name] = cardArray
   db["hands"] = newHands
 
@@ -91,11 +125,11 @@ add_player = (playerName) ->
     db.scores[playerName] = 0
   cards = []
   while cards.length < 5
-    cards.push random_white_card()
+    cards.push nextCard("white")
   db.hands[playerName] = cards
   if db.activePlayers.length == 1
     db.czar = playerName
-    db.blackCard = random_black_card()
+    db.blackCard = nextCard("black")
 
 # remove player from active list
 # remove any associated hands
@@ -151,6 +185,7 @@ submit_answer = (playerName, handIndices) ->
     i = playerHand.indexOf(card)
     playerHand.splice(i,1)
   db.answers.push [playerName, cards]
+  
 
 # specify winning card and reset game for next round
 # @param answerIndex: if value outside db.answers array range, no winner this round
@@ -176,7 +211,7 @@ czar_choose_winner = (answerIndex) ->
 
   db["answers"] = []
   fix_hands()
-  db["blackCard"] = random_black_card()
+  db["blackCard"] = nextCard("black")
   if db.activePlayers.length == 0
     db.czar = null
   else if !db.czar?
@@ -209,17 +244,17 @@ module.exports = (robot) ->
     msg.send helpSummary
 
   robot.respond /cah black$/i, (msg) ->
-    msg.send random_black_card()
-
+#    msg.send random_black_card()
+    msg.send nextCard("black")
   robot.respond /cah white$/i, (msg) ->
     msg.send random_white_card()
 
-  robot.respond /cah play$/i, (msg) ->
+  robot.hear /cah play$/i, (msg) ->
     name = sender(msg)
     add_player(name)
     msg.reply "You are now an active CAH player."
 
-  robot.respond /cah retire$/i, (msg) ->
+  robot.hear /cah retire$/i, (msg) ->
     name = sender(msg)
     remove_player(name)
     msg.reply "You are no longer a CAH player. Your score will be preserved should you decide to play again."
@@ -239,7 +274,7 @@ module.exports = (robot) ->
         responseString += ", #{db.activePlayers[i]}"
       msg.send responseString
 
-  robot.respond /cah leaders$/i, (msg) ->
+  robot.hear /cah leaders$/i, (msg) ->
     scoreTuples = []
     for name,score of db.scores
       scoreTuples.push([name,score])
@@ -255,7 +290,7 @@ module.exports = (robot) ->
       responseString += "\n#{scoreTuples[i][1]} #{scoreTuples[i][0]}"
     msg.send responseString
 
-  robot.respond /cah score$/i, (msg) ->
+  robot.hear /cah score$/i, (msg) ->
     score = db.scores[sender(msg)]
     if score?
       msg.reply score
@@ -297,8 +332,9 @@ module.exports = (robot) ->
             return
       submit_answer(sender(msg), nums)
       msg.reply "Submission accepted."
+      robot.messageRoom '#cah', game_state_string() if db.answers.length == db.activePlayers.length-1  
 
-  robot.respond /cah answers$/i, (msg) ->
+  robot.hear /cah answers$/i, (msg) ->
     if sender(msg) != db.czar
       msg.reply "Only the Card Czar may see the white card submissions."
     else
@@ -309,7 +345,7 @@ module.exports = (robot) ->
         responseString += "\n#{i}: #{generate_phrase(db.blackCard, cards)}"
       msg.reply responseString
 
-  robot.respond /cah choose ([0-9]+)$/i, (msg) ->
+  robot.hear /cah choose ([0-9]+)$/i, (msg) ->
     if sender(msg) != db.czar
       msg.reply "Only the Card Czar may choose a winner."
     else if db.answers.length == 0
@@ -321,8 +357,9 @@ module.exports = (robot) ->
       else
         msg.send czar_choose_winner num
 
-  robot.respond /cah status$/i, (msg) ->
+  robot.hear /cah status$/i, (msg) ->
     msg.send game_state_string()
 
-  robot.respond /cah skip$/i, (msg) ->
+  robot.hear /cah skip$/i, (msg) ->
     msg.send czar_choose_winner -1
+
